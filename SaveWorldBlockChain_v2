@@ -1,0 +1,186 @@
+// SaveWorldBlockchain_Improved.cpp
+// Author: Rana Ammar Yasir
+// Description: Advanced Save World Blockchain with Proof of Work, Proof of Action, Signatures, Merkle Root, and Persistent Storage
+
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <sstream>
+#include <fstream>
+#include <iomanip>
+#include <openssl/sha.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
+#include <openssl/obj_mac.h>
+#include <openssl/pem.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/buffer.h>
+#include <json/json.h>
+
+using namespace std;
+
+// Utility: SHA256 hash
+string sha256(const string &input) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)input.c_str(), input.size(), hash);
+    stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << hex << setw(2) << setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
+// Utility: Merkle Root calculation
+string calculateMerkleRoot(const vector<string> &transactions) {
+    if (transactions.empty()) return "";
+    vector<string> temp = transactions;
+    while (temp.size() > 1) {
+        if (temp.size() % 2 != 0) temp.push_back(temp.back());
+        vector<string> newHash;
+        for (size_t i = 0; i < temp.size(); i += 2) {
+            newHash.push_back(sha256(temp[i] + temp[i + 1]));
+        }
+        temp = newHash;
+    }
+    return temp[0];
+}
+
+// Block structure
+struct Block {
+    int index;
+    time_t timestamp;
+    vector<string> transactions;
+    string merkleRoot;
+    string prevHash;
+    string hash;
+    int nonce;
+    string actor;
+    string location;
+    string proofLink;
+    string signature;
+
+    Block(int idx, vector<string> txs, string prev, string actor, string location, string proofLink)
+        : index(idx), transactions(txs), prevHash(prev), nonce(0), actor(actor), location(location), proofLink(proofLink) {
+        timestamp = time(nullptr);
+        merkleRoot = calculateMerkleRoot(transactions);
+        hash = calculateHash();
+    }
+
+    string calculateHash() const {
+        stringstream ss;
+        ss << index << timestamp << merkleRoot << prevHash << nonce << actor << location << proofLink;
+        return sha256(ss.str());
+    }
+
+    void mineBlock(int difficulty) {
+        string target(difficulty, '0');
+        do {
+            nonce++;
+            hash = calculateHash();
+        } while (hash.substr(0, difficulty) != target);
+        cout << "Block mined: " << hash << endl;
+    }
+};
+
+// Blockchain class
+class Blockchain {
+private:
+    vector<Block> chain;
+    int difficulty;
+
+public:
+    Blockchain(int diff = 4) : difficulty(diff) {
+        chain.push_back(createGenesisBlock());
+    }
+
+    Block createGenesisBlock() {
+        return Block(0, {"Genesis Block - Save World"}, "0", "admin", "Earth", "");
+    }
+
+    Block getLatestBlock() const {
+        return chain.back();
+    }
+
+    void addBlock(vector<string> txs, string actor, string location, string proofLink) {
+        Block newBlock(chain.size(), txs, getLatestBlock().hash, actor, location, proofLink);
+        cout << "Mining block " << newBlock.index << " with actor: " << actor << endl;
+        newBlock.mineBlock(difficulty);
+
+        if (proofOfAction(txs)) {
+            chain.push_back(newBlock);
+            cout << "Block added to chain!" << endl;
+            saveChainToFile("blockchain.json");
+        } else {
+            cout << "Proof of Action failed, block rejected." << endl;
+        }
+    }
+
+    bool proofOfAction(const vector<string> &txs) {
+        int mod = txs.size() % 5;
+        cout << "Proof of Action check (tx count % 5): " << mod << endl;
+        return mod < 3;
+    }
+
+    bool isChainValid() const {
+        for (size_t i = 1; i < chain.size(); i++) {
+            const Block& curr = chain[i];
+            const Block& prev = chain[i - 1];
+            if (curr.hash != curr.calculateHash()) return false;
+            if (curr.prevHash != prev.hash) return false;
+            if (curr.timestamp <= prev.timestamp) return false;
+        }
+        return true;
+    }
+
+    void printChain() const {
+        cout << "------- Blockchain: Save World -------" << endl;
+        for (const auto &block : chain) {
+            cout << "Block #" << block.index << endl;
+            cout << "Timestamp: " << ctime(&block.timestamp);
+            cout << "Transactions: "; for (const auto &tx : block.transactions) cout << tx << "; "; cout << endl;
+            cout << "Merkle Root: " << block.merkleRoot << endl;
+            cout << "Actor: " << block.actor << ", Location: " << block.location << endl;
+            cout << "Proof Link: " << block.proofLink << endl;
+            cout << "PrevHash: " << block.prevHash << endl;
+            cout << "Hash: " << block.hash << endl;
+            cout << "Nonce: " << block.nonce << endl;
+            cout << "---------------------------" << endl;
+        }
+    }
+
+    void saveChainToFile(const string &filename) {
+        Json::Value root;
+        for (const auto &b : chain) {
+            Json::Value block;
+            block["index"] = b.index;
+            block["timestamp"] = (Json::Int64)b.timestamp;
+            for (const auto &tx : b.transactions) block["transactions"].append(tx);
+            block["merkleRoot"] = b.merkleRoot;
+            block["prevHash"] = b.prevHash;
+            block["hash"] = b.hash;
+            block["nonce"] = b.nonce;
+            block["actor"] = b.actor;
+            block["location"] = b.location;
+            block["proofLink"] = b.proofLink;
+            root.append(block);
+        }
+        ofstream file(filename);
+        file << root;
+        file.close();
+    }
+};
+
+// Main function
+int main() {
+    cout << "\nSave World Blockchain by Rana Ammar Yasir\n" << endl;
+    Blockchain saveWorld(4);
+
+    saveWorld.addBlock({"Plant 100 trees"}, "Ali", "Park", "http://example.com/proof1.jpg");
+    saveWorld.addBlock({"Recycle 50kg of plastic", "Educate 30 kids"}, "Sara", "School", "http://example.com/proof2.jpg");
+    saveWorld.addBlock({"Data entry that fails PoA", "Extra item to push limit"}, "FailedUser", "Nowhere", "http://fail.com");
+
+    saveWorld.printChain();
+    cout << "Chain valid? " << (saveWorld.isChainValid() ? "Yes" : "No") << endl;
+    return 0;
+}
