@@ -1,6 +1,6 @@
 // SaveWorldP2PBlockchain.cpp
 // Author: Rana Ammar Yasir
-// Description: P2P Blockchain with Proof of Work, Proof of Action, Synchronization, and Transactions
+// Description: P2P Blockchain with Proof of Work, Proof of Action, Synchronization, Transactions, and Cryptographic Wallets
 
 #include <iostream>
 #include <vector>
@@ -13,6 +13,7 @@
 #include <set>
 #include <openssl/sha.h>
 #include <boost/asio.hpp>
+#include "wallet.h"  // Include your wallet
 
 using namespace std;
 using boost::asio::ip::tcp;
@@ -34,9 +35,23 @@ struct Transaction {
     string from;
     string to;
     int amount;
+    string publicKey;
+    string signature;
 
     string toString() const {
         return from + to + to_string(amount);
+    }
+
+    void sign(const Wallet &wallet) {
+        string message = toString();
+        signature = wallet.sign(message);
+        publicKey = wallet.getPublicKey();
+    }
+
+    bool isValid() const {
+        if (from == "SYSTEM") return true; // Allow coinbase
+        string message = toString();
+        return Wallet::verifySignature(message, signature, publicKey);
     }
 };
 
@@ -86,15 +101,23 @@ public:
 
     void addBlock(const vector<Transaction> &transactions) {
         lock_guard<mutex> lock(chainMutex);
+
+        for (const auto &tx : transactions) {
+            if (!tx.isValid()) {
+                cerr << "❌ Invalid transaction detected. Block rejected.\n";
+                return;
+            }
+        }
+
         Block newBlock(chain.size(), transactions, getLatestBlock().hash);
         cout << "Mining block " << newBlock.index << " with " << transactions.size() << " txs...\n";
         newBlock.mineBlock(difficulty);
 
         if (proofOfAction(transactions)) {
             chain.push_back(newBlock);
-            cout << "Block added to chain.\n";
+            cout << "✅ Block added to chain.\n";
         } else {
-            cout << "Proof of Action failed. Block rejected.\n";
+            cout << "❌ Proof of Action failed. Block rejected.\n";
         }
     }
 
@@ -116,6 +139,7 @@ public:
             cout << "Transactions:\n";
             for (auto &tx : block.transactions) {
                 cout << "  From: " << tx.from << " To: " << tx.to << " Amount: " << tx.amount << "\n";
+                cout << "    Signature: " << tx.signature.substr(0, 20) << "... \n";
             }
             cout << "-------------------------------\n";
         }
@@ -146,7 +170,6 @@ public:
             auto socket = make_shared<tcp::socket>(io_context);
             boost::asio::connect(*socket, endpoints);
             cout << "Connected to peer: " << host << ":" << port << endl;
-            // In a real network, we would send/receive blockchain data here
         } catch (exception &e) {
             cerr << "Connection failed: " << e.what() << endl;
         }
@@ -158,7 +181,6 @@ private:
         acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
             if (!ec) {
                 cout << "New peer connected.\n";
-                // In a real app, read data here
             }
             startAccept();
         });
@@ -173,17 +195,38 @@ private:
 int main() {
     Blockchain saveWorldChain(4);
 
-    // Start a P2P node
-    short port = 8080; // or any available port
-    Node node(port, saveWorldChain);
+    // Create wallets
+    Wallet walletA;
+    Wallet walletB;
 
+    // Start a P2P node
+    short port = 8080;
+    Node node(port, saveWorldChain);
     thread nodeThread([&]() { node.run(); });
 
-    // Example: Add sample transactions
-    vector<Transaction> txs1 = { {"Alice", "Bob", 10}, {"Charlie", "Dave", 20} };
+    // Create signed transactions
+    Transaction tx1;
+    tx1.from = walletA.getAddress();
+    tx1.to = walletB.getAddress();
+    tx1.amount = 10;
+    tx1.sign(walletA);
+
+    Transaction tx2;
+    tx2.from = walletB.getAddress();
+    tx2.to = walletA.getAddress();
+    tx2.amount = 20;
+    tx2.sign(walletB);
+
+    vector<Transaction> txs1 = { tx1, tx2 };
     saveWorldChain.addBlock(txs1);
 
-    vector<Transaction> txs2 = { {"Eve", "Frank", 30} }; // Will fail PoA
+    // Transaction with PoA fail
+    Transaction tx3;
+    tx3.from = walletA.getAddress();
+    tx3.to = walletB.getAddress();
+    tx3.amount = 30;
+    tx3.sign(walletA);
+    vector<Transaction> txs2 = { tx3 };
     saveWorldChain.addBlock(txs2);
 
     saveWorldChain.printChain();
@@ -191,3 +234,4 @@ int main() {
     nodeThread.join();
     return 0;
 }
+
