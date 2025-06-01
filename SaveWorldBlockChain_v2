@@ -155,12 +155,17 @@ private:
 // P2P Node class
 class Node {
 public:
-    Node(short port, Blockchain &blockchain) : acceptor(io_context, tcp::endpoint(tcp::v4(), port)), blockchain(blockchain) {
+    Node(short port, Blockchain &blockchain)
+        : acceptor(io_context, tcp::endpoint(tcp::v4(), port)), blockchain(blockchain) {
         startAccept();
     }
 
     void run() {
-        io_context.run();
+        io_thread = thread([this]() { io_context.run(); });
+    }
+
+    void join() {
+        if (io_thread.joinable()) io_thread.join();
     }
 
     void connectToPeer(const string &host, short port) {
@@ -170,6 +175,7 @@ public:
             auto socket = make_shared<tcp::socket>(io_context);
             boost::asio::connect(*socket, endpoints);
             cout << "Connected to peer: " << host << ":" << port << endl;
+            // TODO: Peer message handling can be implemented here
         } catch (exception &e) {
             cerr << "Connection failed: " << e.what() << endl;
         }
@@ -181,6 +187,7 @@ private:
         acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
             if (!ec) {
                 cout << "New peer connected.\n";
+                // TODO: Handle incoming peer communication here
             }
             startAccept();
         });
@@ -189,6 +196,7 @@ private:
     boost::asio::io_context io_context;
     tcp::acceptor acceptor;
     Blockchain &blockchain;
+    thread io_thread;
 };
 
 // Main function
@@ -202,7 +210,7 @@ int main() {
     // Start a P2P node
     short port = 8080;
     Node node(port, saveWorldChain);
-    thread nodeThread([&]() { node.run(); });
+    node.run();
 
     // Create signed transactions
     Transaction tx1;
@@ -231,8 +239,6 @@ int main() {
 
     saveWorldChain.printChain();
 
-    nodeThread.join();
+    node.join();
     return 0;
 }
-
-
